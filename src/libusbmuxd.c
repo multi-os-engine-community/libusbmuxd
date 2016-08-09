@@ -165,6 +165,15 @@ static struct usbmuxd_device_record* device_record_from_plist(plist_t props)
 		dev->location = (uint32_t)val;
 	}
 
+	n = plist_dict_get_item(props, "ConnectionType");
+	if (n && plist_get_node_type(n) == PLIST_STRING) {
+		plist_get_string_val(n, &strval);
+		if (strval) {
+			strncpy(dev->connection_type, strval, 255);
+			free(strval);
+		}
+	}
+
 	return dev;
 }
 
@@ -691,6 +700,8 @@ static int get_next_event(int sfd, usbmuxd_event_cb_t callback, void *user_data)
 		devinfo->product_id = dev->product_id;
 		memset(devinfo->udid, '\0', sizeof(devinfo->udid));
 		memcpy(devinfo->udid, dev->serial_number, sizeof(devinfo->udid));
+		memset(devinfo->connection_type, '\0', sizeof(devinfo->connection_type));
+        strncpy(devinfo->connection_type, dev->connection_type, sizeof(devinfo->connection_type));
 
 		if (strcasecmp(devinfo->udid, "ffffffffffffffffffffffffffffffffffffffff") == 0) {
 			sprintf(devinfo->udid + 32, "%08x", devinfo->handle);
@@ -848,6 +859,8 @@ static usbmuxd_device_info_t *device_info_from_device_record(struct usbmuxd_devi
 	devinfo->product_id = dev->product_id;
 	memset(devinfo->udid, '\0', sizeof(devinfo->udid));
 	memcpy(devinfo->udid, dev->serial_number, sizeof(devinfo->udid));
+	memset(devinfo->connection_type, '\0', sizeof(devinfo->connection_type));
+    strncpy(devinfo->connection_type, dev->connection_type, sizeof(devinfo->connection_type));
 
 	if (strcasecmp(devinfo->udid, "ffffffffffffffffffffffffffffffffffffffff") == 0) {
 		sprintf(devinfo->udid + 32, "%08x", devinfo->handle);
