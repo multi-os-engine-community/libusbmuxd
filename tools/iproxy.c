@@ -40,9 +40,14 @@ typedef unsigned int socklen_t;
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <netinet/in.h>
+#include <signal.h>
 #endif
 #include "socket.h"
 #include "usbmuxd.h"
+
+#ifndef ETIMEDOUT
+#define ETIMEDOUT 138
+#endif
 
 static uint16_t listen_port = 0;
 static uint16_t device_port = 0;
@@ -67,7 +72,7 @@ static void *run_stoc_loop(void *arg)
 	while (!cdata->stop_stoc && cdata->fd > 0 && cdata->sfd > 0) {
 		recv_len = socket_receive_timeout(cdata->sfd, buffer, sizeof(buffer), 0, 5000);
 		if (recv_len <= 0) {
-			if (recv_len == 0) {
+			if (recv_len == 0 || recv_len == -ETIMEDOUT) {
 				// try again
 				continue;
 			} else {
@@ -120,7 +125,7 @@ static void *run_ctos_loop(void *arg)
 	while (!cdata->stop_ctos && cdata->fd>0 && cdata->sfd>0) {
 		recv_len = socket_receive_timeout(cdata->fd, buffer, sizeof(buffer), 0, 5000);
 		if (recv_len <= 0) {
-			if (recv_len == 0) {
+			if (recv_len == 0 || recv_len == -ETIMEDOUT) {
 				// try again
 				continue;
 			} else {
@@ -273,6 +278,9 @@ int main(int argc, char **argv)
 		return -EINVAL;
 	}
 
+#ifndef WIN32
+	signal(SIGPIPE, SIG_IGN);
+#endif
 	// first create the listening socket endpoint waiting for connections.
 	mysock = socket_create(listen_port);
 	if (mysock < 0) {
