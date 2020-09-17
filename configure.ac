@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.61)
-AC_INIT(libusbmuxd, 2.0.2, nospam@nowhere.com)
+AC_INIT(libusbmuxd, 2.0.3, [https://github.com/libimobiledevice/libusbmuxd/issues],, [https://libimobiledevice.org])
 AM_INIT_AUTOMAKE([dist-bzip2 no-dist-gzip check-news])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES])
 AC_CONFIG_SRCDIR([src/])
@@ -19,7 +19,7 @@ LIBUSBMUXD_SO_VERSION=6:0:0
 
 
 dnl Minimum package versions
-LIBPLIST_VERSION=2.1.0
+LIBPLIST_VERSION=2.2.0
 
 AC_SUBST(LIBUSBMUXD_SO_VERSION)
 AC_SUBST(LIBPLIST_VERSION)
@@ -33,7 +33,7 @@ AM_PROG_CC_C_O
 AC_PROG_LIBTOOL
 
 # Checks for libraries.
-PKG_CHECK_MODULES(libplist, libplist >= $LIBPLIST_VERSION)
+PKG_CHECK_MODULES(libplist, libplist-2.0 >= $LIBPLIST_VERSION)
 AC_CHECK_HEADERS([sys/inotify.h], have_inotify=yes, have_inotify=no)
 
 AC_ARG_WITH([inotify],
@@ -126,7 +126,8 @@ common/Makefile
 src/Makefile
 include/Makefile
 tools/Makefile
-libusbmuxd.pc
+docs/Makefile
+src/libusbmuxd-2.0.pc
 ])
 
 echo "

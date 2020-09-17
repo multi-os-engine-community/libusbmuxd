@@ -21,6 +21,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
+#define TOOL_NAME "inetcat"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -29,6 +35,7 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <errno.h>
+#include <getopt.h>
 #ifdef WIN32
 #include <windows.h>
 #include <winsock2.h>
@@ -42,6 +49,8 @@
 
 #include "usbmuxd.h"
 #include "socket.h"
+
+static int debug_level = 0;
 
 static size_t read_data_socket(int fd, uint8_t* buf, size_t bufsize)
 {
@@ -69,20 +78,89 @@ static size_t read_data_socket(int fd, uint8_t* buf, size_t bufsize)
     return (size_t)ret;
 }
 
+static void print_usage(int argc, char **argv, int is_error)
+{
+    char *name = NULL;
+    name = strrchr(argv[0], '/');
+    fprintf(is_error ? stderr : stdout, "Usage: %s [OPTIONS] DEVICE_PORT\n", (name ? name + 1: argv[0]));
+    fprintf(is_error ? stderr : stdout,
+        "\n" \
+        "Opens a read/write interface via STDIN/STDOUT to a TCP port on a usbmux device.\n" \
+        "\n" \
+        "OPTIONS:\n" \
+        "  -u, --udid UDID    target specific device by UDID\n" \
+        "  -n, --network      connect to network device\n" \
+        "  -l, --local        connect to USB device (default)\n" \
+        "  -h, --help         prints usage information\n" \
+        "  -d, --debug        increase debug level\n" \
+        "  -v, --version      prints version information\n" \
+        "\n" \
+        "Homepage:    <" PACKAGE_URL ">\n"
+        "Bug Reports: <" PACKAGE_BUGREPORT ">\n"
+    );
+}
+
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        printf("usage: %s DEVICE_TCP_PORT [UDID]\n", argv[0]);
-        return 1;
-    }
+    const struct option longopts[] = {
+        { "debug", no_argument, NULL, 'd' },
+        { "help", no_argument, NULL, 'h' },
+        { "udid", required_argument, NULL, 'u' },
+        { "local", no_argument, NULL, 'l' },
+        { "network", no_argument, NULL, 'n' },
+        { "version", no_argument, NULL, 'v' },
+        { NULL, 0, NULL, 0}
+    };
 
-    int device_port = atoi(argv[1]);
     char* device_udid = NULL;
+    static enum usbmux_lookup_options lookup_opts = 0;
 
-    if (argc > 2) {
-        device_udid = argv[2];
+    int c = 0;
+    while ((c = getopt_long(argc, argv, "dhu:lnv", longopts, NULL)) != -1) {
+        switch (c) {
+        case 'd':
+            libusbmuxd_set_debug_level(++debug_level);
+            break;
+        case 'u':
+            if (!*optarg) {
+                fprintf(stderr, "ERROR: UDID must not be empty!\n");
+                print_usage(argc, argv, 1);
+                return 2;
+            }
+            free(device_udid);
+            device_udid = strdup(optarg);
+            break;
+        case 'l':
+            lookup_opts |= DEVICE_LOOKUP_USBMUX;
+            break;
+        case 'n':
+            lookup_opts |= DEVICE_LOOKUP_NETWORK;
+            break;
+        case 'h':
+            print_usage(argc, argv, 0);
+            return 0;
+        case 'v':
+            printf("%s %s\n", TOOL_NAME, PACKAGE_VERSION);
+            return 0;
+        default:
+            print_usage(argc, argv, 1);
+            return 2;
+        }
     }
 
+    if (lookup_opts == 0) {
+        lookup_opts = DEVICE_LOOKUP_USBMUX;
+    }
+
+    argc -= optind;
+    argv += optind;
+
+    if (argc < 1) {
+        print_usage(argc + optind, argv - optind, 1);
+        return 2;
+    }
+
+    int device_port = atoi(argv[0]);
     if (!device_port) {
         fprintf(stderr, "Invalid device_port specified!\n");
         return -EINVAL;
@@ -91,31 +169,39 @@ int main(int argc, char **argv)
 #ifndef WIN32
     signal(SIGPIPE, SIG_IGN);
 #endif
+
     usbmuxd_device_info_t *dev_list = NULL;
-    int count;
-    if ((count = usbmuxd_get_device_list(&dev_list)) < 0) {
-        printf("Connecting to usbmuxd failed, terminating.\n");
-        free(dev_list);
-        return 1;
-    }
-
-    if (dev_list == NULL || dev_list[0].handle == 0) {
-        fprintf(stderr, "No connected device found, terminating.\n");
-        free(dev_list);
-        return 1;
-    }
-
     usbmuxd_device_info_t *dev = NULL;
+    usbmuxd_device_info_t muxdev;
+
     if (device_udid) {
+        if (usbmuxd_get_device(device_udid, &muxdev, lookup_opts) > 0) {
+            dev = &muxdev;
+        }
+    } else {
+        int count;
+        if ((count = usbmuxd_get_device_list(&dev_list)) < 0) {
+            printf("Connecting to usbmuxd failed, terminating.\n");
+            free(dev_list);
+            return 1;
+        }
+
+        if (dev_list == NULL || dev_list[0].handle == 0) {
+            fprintf(stderr, "No connected device found, terminating.\n");
+            free(dev_list);
+            return 1;
+        }
+
         int i;
         for (i = 0; i < count; i++) {
-            if (strncmp(dev_list[i].udid, device_udid, sizeof(dev_list[0].udid)) == 0) {
+            if (dev_list[i].conn_type == CONNECTION_TYPE_USB && (lookup_opts & DEVICE_LOOKUP_USBMUX)) {
+                dev = &(dev_list[i]);
+                break;
+            } else if (dev_list[i].conn_type == CONNECTION_TYPE_NETWORK && (lookup_opts & DEVICE_LOOKUP_NETWORK)) {
                 dev = &(dev_list[i]);
                 break;
             }
         }
-    } else {
-        dev = &(dev_list[0]);
     }
 
     if (dev == NULL || dev->handle == 0) {
@@ -124,10 +210,42 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int devfd = usbmuxd_connect(dev->handle, device_port);
+    int devfd = -1;
+    if (dev->conn_type == CONNECTION_TYPE_NETWORK) {
+        unsigned char saddr_[32];
+        memset(saddr_, '\0', sizeof(saddr_));
+        struct sockaddr* saddr = (struct sockaddr*)&saddr_[0];
+        if (((char*)dev->conn_data)[1] == 0x02) { // AF_INET
+            saddr->sa_family = AF_INET;
+            memcpy(&saddr->sa_data[0], (char*)dev->conn_data+2, 14);
+        }
+        else if (((char*)dev->conn_data)[1] == 0x1E) { //AF_INET6 (bsd)
+#ifdef AF_INET6
+            saddr->sa_family = AF_INET6;
+            memcpy(&saddr->sa_data[0], (char*)dev->conn_data+2, 26);
+#else
+            fprintf(stderr, "ERROR: Got an IPv6 address but this system doesn't support IPv6\n");
+            free(dev_list);
+            return 1;
+#endif
+        }
+        else {
+            fprintf(stderr, "Unsupported address family 0x%02x\n", ((char*)dev->conn_data)[1]);
+            free(dev_list);
+            return 1;
+        }
+        char addrtxt[48];
+        addrtxt[0] = '\0';
+        if (!socket_addr_to_string(saddr, addrtxt, sizeof(addrtxt))) {
+            fprintf(stderr, "Failed to convert network address: %d (%s)\n", errno, strerror(errno));
+        }
+	devfd = socket_connect_addr(saddr, device_port);
+    } else if (dev->conn_type == CONNECTION_TYPE_USB) {
+        devfd = usbmuxd_connect(dev->handle, device_port);
+    }
     free(dev_list);
     if (devfd < 0) {
-        fprintf(stderr, "Error connecting to device!\n");
+        fprintf(stderr, "Error connecting to device: %s\n", strerror(errno));
         return 1;
     }
 
